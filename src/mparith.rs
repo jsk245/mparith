@@ -934,9 +934,6 @@ mod tests {
                         v[QUOT_BIN],
                         (super::build_bigint_bin(v[A_BIN]) / super::build_bigint_bin(v[B_BIN]))
                             .to_string_bin(),
-                        "we are testing division with {} and {}",
-                        v[A_DEC],
-                        v[B_DEC]
                     );
                     assert_eq!(
                         v[QUOT_BIN],
@@ -980,9 +977,6 @@ mod tests {
                             v[REM_BIN],
                             (super::build_bigint_bin(v[A_BIN]) % super::build_bigint_bin(v[B_BIN]))
                                 .to_string_bin(),
-                            "we are testing division with {} and {}",
-                            v[A_DEC],
-                            v[B_DEC]
                         );
                         assert_eq!(
                             v[REM_BIN],
