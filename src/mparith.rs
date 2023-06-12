@@ -390,23 +390,28 @@ fn divmod(a: &BigInt, b: &BigInt) -> (BigInt, BigInt) {
         panic!("Divide by zero error")
     }
 
+    // used in algorithm to keep track of a - bQ, but will be the remainder at the end
+    let mut r: BigInt = a + build_bigint("0");
+    r.sgn = r.sgn.abs();
+
     if a.sgn == 0 || a.len < b.len {
-        return (build_bigint("0"), a + build_bigint("0"));
+        if a.sgn * b.sgn == -1 {
+            return (build_bigint("-1"), b - r);
+        }
+        return (build_bigint("0"), r);
     }
 
     // for approximation of q
     let B_fp: f64 = B as f64;
 
-    // used in algorithm to keep track of a - bQ, but will be the remainder at the end
-    let mut r: BigInt = a + build_bigint("0");
-    r.sgn = r.sgn.abs();
-
-    // not a valid BigInt, but will be used to store results of division and will eventually be the quotient
+    // will be used to store results of division and will eventually be the quotient
     let mut q: BigInt = BigInt {
         mag: vec![0; a.len - b.len + 1],
-        sgn: 1,
+        sgn: 0,
         len: 0,
     };
+
+    let one: BigInt = build_bigint("1");
 
     // used to temporaily hold the result of r - bq
     let mut tmp: BigInt = build_bigint("0");
@@ -417,7 +422,6 @@ fn divmod(a: &BigInt, b: &BigInt) -> (BigInt, BigInt) {
     // for arithmetic involving b scaled by the appropriate factor and base
     let mut bb: BigInt;
 
-    let one: BigInt = build_bigint("1");
     let mut q_len: usize = a.len - b.len + 1;
     let mut ar: f64;
     let br: f64;
@@ -929,7 +933,10 @@ mod tests {
                     assert_eq!(
                         v[QUOT_BIN],
                         (super::build_bigint_bin(v[A_BIN]) / super::build_bigint_bin(v[B_BIN]))
-                            .to_string_bin()
+                            .to_string_bin(),
+                        "we are testing division with {} and {}",
+                        v[A_DEC],
+                        v[B_DEC]
                     );
                     assert_eq!(
                         v[QUOT_BIN],
@@ -972,7 +979,10 @@ mod tests {
                         assert_eq!(
                             v[REM_BIN],
                             (super::build_bigint_bin(v[A_BIN]) % super::build_bigint_bin(v[B_BIN]))
-                                .to_string_bin()
+                                .to_string_bin(),
+                            "we are testing division with {} and {}",
+                            v[A_DEC],
+                            v[B_DEC]
                         );
                         assert_eq!(
                             v[REM_BIN],
