@@ -13,7 +13,7 @@ To implement the addition, subtraction, division, and multiplication operations,
 - `to_string_bin(&self)` - converts a bigint to a string containing a number in binary format
 
 ## testing
-Since Python supports bignums, we used the language to generate 1000 pairs of random numbers ranging from -10^100 to 10^100. 
+Since Python supports bignums, we used the language to generate 1000 pairs of random numbers ranging from -10^100 to 10^100 (using a log scale to distribute numbers more evenly between the different orders of magnitude). 
 We then checked that these numbers with the +,-,\*,/,% operations all outputted the proper result. 
 We also added a few edge cases, mostly those involving operations that resulted in 0.
 
