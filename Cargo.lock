@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "pell"
+name = "mparith"
 version = "0.1.0"
