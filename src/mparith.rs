@@ -1,4 +1,4 @@
-use std::cmp;
+use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
 
@@ -707,6 +707,48 @@ impl fmt::Display for BigInt {
     }
 }
 
+impl Ord for BigInt {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.sgn != other.sgn {
+            return self.sgn.cmp(&other.sgn);
+        }
+
+        if self.len != other.len {
+            match self.sgn {
+                1 => return self.len.cmp(&other.len),
+                -1 => return other.len.cmp(&self.len),
+                _ => (),
+            }
+        }
+
+        for i in (0..self.len).rev() {
+            if self.mag[i] != other.mag[i] {
+                match self.sgn {
+                    1 => return self.mag[i].cmp(&other.mag[i]),
+                    -1 => return other.mag[i].cmp(&self.mag[i]),
+                    _ => (),
+                }
+            }
+        }
+
+        return Ordering::Equal;
+    }
+}
+
+impl PartialOrd for BigInt {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for BigInt {}
+
+impl PartialEq for BigInt {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs::File;
@@ -726,6 +768,9 @@ mod tests {
     const QUOT_DEC: usize = 11;
     const REM_BIN: usize = 12;
     const REM_DEC: usize = 13;
+    const EQ: usize = 14;
+    const GT: usize = 15;
+    const LT: usize = 16;
 
     // https://doc.rust-lang.org/rust-by-example/std_misc/file/read_lines.html
     fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
@@ -994,6 +1039,45 @@ mod tests {
                                 .to_string()
                         );
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bigint_cmp_test() {
+        if let Ok(lines) = read_lines("./test_inputs.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[EQ].to_lowercase(),
+                        (super::build_bigint_bin(v[A_BIN]) == super::build_bigint_bin(v[B_BIN]))
+                            .to_string()
+                    );
+                    assert_eq!(
+                        v[EQ].to_lowercase(),
+                        (super::build_bigint(v[A_DEC]) == super::build_bigint(v[B_DEC]))
+                            .to_string()
+                    );
+                    assert_eq!(
+                        v[GT].to_lowercase(),
+                        (super::build_bigint_bin(v[A_BIN]) > super::build_bigint_bin(v[B_BIN]))
+                            .to_string()
+                    );
+                    assert_eq!(
+                        v[GT].to_lowercase(),
+                        (super::build_bigint(v[A_DEC]) > super::build_bigint(v[B_DEC])).to_string()
+                    );
+                    assert_eq!(
+                        v[LT].to_lowercase(),
+                        (super::build_bigint_bin(v[A_BIN]) < super::build_bigint_bin(v[B_BIN]))
+                            .to_string()
+                    );
+                    assert_eq!(
+                        v[LT].to_lowercase(),
+                        (super::build_bigint(v[A_DEC]) < super::build_bigint(v[B_DEC])).to_string()
+                    );
                 }
             }
         }
