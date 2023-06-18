@@ -542,7 +542,7 @@ fn shl(a: &BigInt, b: &BigInt) -> BigInt {
 
     let c_mag_leading_zeros: usize;
     match q.len {
-        2 => c_mag_leading_zeros = (q.mag[0] + q.mag[1] << (isize::BITS - 2)) as usize,
+        2 => c_mag_leading_zeros = (q.mag[0] | (1 << (isize::BITS - 2))) as usize,
         1 => c_mag_leading_zeros = q.mag[0] as usize,
         _ => c_mag_leading_zeros = 0 as usize,
     }
@@ -572,7 +572,7 @@ fn shl(a: &BigInt, b: &BigInt) -> BigInt {
 
     for i in c_mag_leading_zeros..=(a.len + c_mag_leading_zeros ) {
         let tmp = c_mag[i] & upper_bits;
-        c_mag[i] = prev_pushed_val + ((c_mag[i] & lower_bits) << amount_shifted);
+        c_mag[i] = prev_pushed_val | ((c_mag[i] & lower_bits) << amount_shifted);
         prev_pushed_val = tmp >> (isize::BITS - 2 - amount_shifted);
     }
 
@@ -588,7 +588,97 @@ fn shl(a: &BigInt, b: &BigInt) -> BigInt {
 }
 
 fn shr(a: &BigInt, b: &BigInt) -> BigInt {
-    build_bigint("0")
+    let q: BigInt;
+    let r: BigInt;
+    // compiler should optimize this but move the build_bigint outside to test later
+    (q,r) = divmod(b, &build_bigint(&(isize::BITS - 2).to_string()));
+
+    let mut new_first_index: usize = 0;
+    let mut big_shift = false;
+    let neg_one: BigInt = BigInt {
+        mag: vec![1],
+        sgn: -1,
+        len: 1,
+    };
+
+    match q.len {
+        0 => new_first_index = 0 as usize,
+        1 => new_first_index = q.mag[0] as usize,
+        2 => {
+            if q.mag[1] > 1 {
+                big_shift = true;
+            } else {
+                new_first_index = (q.mag[0] | (1 << (isize::BITS - 2))) as usize;
+            }
+        },
+        _ => big_shift = true,
+    }
+    if big_shift || new_first_index >= a.len {
+        if a.sgn == -1 {
+            return neg_one;
+        } else {
+            return BigInt {
+                mag: vec![],
+                sgn: 0,
+                len: 0,
+            };
+        }
+    }
+
+    
+    let mut c: BigInt = BigInt {
+        mag: a.mag.clone(),
+        len: a.len,
+        sgn: a.sgn,
+    };
+
+    if a.sgn == -1 {
+        for i in 0..(c.len) {
+            c.mag[i] = c.mag[i] ^ (isize::MAX >> 1);
+        }
+        c = c + &neg_one;
+    }
+
+    c.mag = c.mag[new_first_index..(c.len)].to_vec();
+    c.len = c.len - new_first_index;
+
+    let upper_bits: isize;
+    let amount_shifted: u32;
+    match r.len {
+        1 => {
+            upper_bits = isize::MAX >> (1 + r.mag[0]) << r.mag[0];
+            amount_shifted = r.mag[0] as u32;
+        },
+        _ => {
+            upper_bits = isize::MAX >> 1;
+            amount_shifted = 0;
+        },
+    }
+    let lower_bits = (isize::MAX >> 1) ^ upper_bits;
+
+    let mut prev_pushed_val: isize = 0;
+    if a.sgn == -1 {
+        prev_pushed_val = isize::MAX >> (isize::BITS - 1 - amount_shifted) << (isize::BITS - 2 - amount_shifted);
+    }
+    for i in (0..(c.len)).rev() {
+        let tmp = c.mag[i] & lower_bits;
+        c.mag[i] = prev_pushed_val | ((c.mag[i] & upper_bits) >> amount_shifted);
+        prev_pushed_val = tmp << (isize::BITS - 2 - amount_shifted);
+    }
+
+    if a.sgn == -1 {
+        for i in 0..(c.len) {
+            c.mag[i] = c.mag[i] ^ (isize::MAX >> 1);
+        }
+        c = c + neg_one;
+    } else if c.len > 0 && c.mag[c.len - 1] == 0 {
+        c.len -= 1;
+        if c.len == 0 {
+            c.sgn = 0;
+        }
+    }
+
+    return c;
 }
 
 impl ops::Add<BigInt> for BigInt {
@@ -1300,6 +1390,9 @@ mod tests {
                         v[SHR_BIN],
                         (super::build_bigint_bin(v[A_BIN]) >> super::build_bigint_bin(v[SHT_AMT_BIN]))
                             .to_string_bin(),
+                        "{0}, {1}",
+                        super::build_bigint_bin(v[A_BIN]),
+                        super::build_bigint_bin(v[SHT_AMT_BIN])
                     );
                     assert_eq!(
                         v[SHR_DEC],
