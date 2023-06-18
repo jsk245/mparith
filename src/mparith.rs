@@ -529,6 +529,68 @@ fn divmod(a: &BigInt, b: &BigInt) -> (BigInt, BigInt) {
     return (q, r);
 }
 
+fn shl(a: &BigInt, b: &BigInt) -> BigInt {
+    let q: BigInt;
+    let r: BigInt;
+    // compiler should optimize this but move the build_bigint outside to test later
+    (q,r) = divmod(b, &build_bigint(&(isize::BITS - 2).to_string()));
+
+    // compiler should optimize this but move the build_bigint outside to test later
+    if q.len > 2 || (q.len == 2 && q.mag[1] > 1) {
+        panic!("Integer Overflow");
+    }
+
+    let c_mag_leading_zeros: usize;
+    match q.len {
+        2 => c_mag_leading_zeros = (q.mag[0] + q.mag[1] << (isize::BITS - 2)) as usize,
+        1 => c_mag_leading_zeros = q.mag[0] as usize,
+        _ => c_mag_leading_zeros = 0 as usize,
+    }
+
+    let mut c_mag: Vec<isize>;
+    let mut c_len: usize = c_mag_leading_zeros + a.len + 1;
+    let c_sgn = a.sgn;
+
+    c_mag = vec![0; c_mag_leading_zeros];
+    c_mag.extend(&a.mag[0..a.len]);
+    c_mag.push(0);
+
+    let mut prev_pushed_val: isize = 0;
+    let lower_bits: isize;
+    let amount_shifted: u32;
+    match r.len {
+        1 => {
+            lower_bits = isize::MAX >> (1 + r.mag[0]);
+            amount_shifted = r.mag[0] as u32;
+        },
+        _ => {
+            lower_bits = isize::MAX >> 1;
+            amount_shifted = 0;
+        },
+    }
+    let upper_bits = (isize::MAX >> 1) ^ lower_bits;
+
+    for i in c_mag_leading_zeros..=(a.len + c_mag_leading_zeros ) {
+        let tmp = c_mag[i] & upper_bits;
+        c_mag[i] = prev_pushed_val + ((c_mag[i] & lower_bits) << amount_shifted);
+        prev_pushed_val = tmp >> (isize::BITS - 2 - amount_shifted);
+    }
+
+    if c_mag[c_len - 1] == 0 {
+        c_len -= 1;
+    }
+    
+    return BigInt {
+        mag: c_mag,
+        len: c_len,
+        sgn: c_sgn,
+    };
+}
+
+fn shr(a: &BigInt, b: &BigInt) -> BigInt {
+    build_bigint("0")
+}
+
 impl ops::Add<BigInt> for BigInt {
     type Output = BigInt;
 
@@ -701,6 +763,94 @@ impl ops::Rem<&BigInt> for &BigInt {
     }
 }
 
+impl ops::Shl<BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn shl(self, b: BigInt) -> BigInt {
+        if b.sgn == -1 {
+            panic!("Cannot shift by a negative integer");
+        }
+        shl(&self, &b)
+    }
+}
+
+impl ops::Shl<&BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn shl(self, b: &BigInt) -> BigInt {
+        if b.sgn == -1 {
+            panic!("Cannot shift by a negative integer");
+        }
+        shl(&self, b)
+    }
+}
+
+impl ops::Shl<BigInt> for &BigInt {
+    type Output = BigInt;
+
+    fn shl(self, b: BigInt) -> BigInt {
+        if b.sgn == -1 {
+            panic!("Cannot shift by a negative integer");
+        }
+        shl(self, &b)
+    }
+}
+
+impl ops::Shl<&BigInt> for &BigInt {
+    type Output = BigInt;
+
+    fn shl(self, b: &BigInt) -> BigInt {
+        if b.sgn == -1 {
+            panic!("Cannot shift by a negative integer");
+        }
+        shl(self, b)
+    }
+}
+
+impl ops::Shr<BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn shr(self, b: BigInt) -> BigInt {
+        if b.sgn == -1 {
+            panic!("Cannot shift by a negative integer");
+        }
+        shr(&self, &b)
+    }
+}
+
+impl ops::Shr<&BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn shr(self, b: &BigInt) -> BigInt {
+        if b.sgn == -1 {
+            panic!("Cannot shift by a negative integer");
+        }
+        shr(&self, b)
+    }
+}
+
+impl ops::Shr<BigInt> for &BigInt {
+    type Output = BigInt;
+
+    fn shr(self, b: BigInt) -> BigInt {
+        if b.sgn == -1 {
+            panic!("Cannot shift by a negative integer");
+        }
+        shr(self, &b)
+    }
+}
+
+impl ops::Shr<&BigInt> for &BigInt {
+    type Output = BigInt;
+
+    fn shr(self, b: &BigInt) -> BigInt {
+        if b.sgn == -1 {
+            panic!("Cannot shift by a negative integer");
+        }
+        shr(self, b)
+    }
+}
+
 impl fmt::Display for BigInt {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt(&self, f)
@@ -771,6 +921,12 @@ mod tests {
     const EQ: usize = 14;
     const GT: usize = 15;
     const LT: usize = 16;
+    const SHT_AMT_BIN: usize = 17;
+    const SHT_AMT_DEC: usize = 18;
+    const SHL_BIN: usize = 19;
+    const SHL_DEC: usize = 20;
+    const SHR_BIN: usize = 21;
+    const SHR_DEC: usize = 22;
 
     // https://doc.rust-lang.org/rust-by-example/std_misc/file/read_lines.html
     fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
@@ -1077,6 +1233,78 @@ mod tests {
                     assert_eq!(
                         v[LT].to_lowercase(),
                         (super::build_bigint(v[A_DEC]) < super::build_bigint(v[B_DEC])).to_string()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn bigint_shl_byneg_test() {
+        super::build_bigint_bin("0b0") << super::build_bigint_bin("-0b1");
+    }
+
+    #[test]
+    fn bigint_shl_test() {
+        assert_eq!(
+            "0b0",
+            (super::build_bigint_bin("0b0") << super::build_bigint_bin("0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("0b1") << super::build_bigint_bin("0b0")).to_string_bin()
+        );
+
+        if let Ok(lines) = read_lines("./test_inputs.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[SHL_BIN],
+                        (super::build_bigint_bin(v[A_BIN]) << super::build_bigint_bin(v[SHT_AMT_BIN]))
+                            .to_string_bin(),
+                    );
+                    assert_eq!(
+                        v[SHL_DEC],
+                        (super::build_bigint(v[A_DEC]) << super::build_bigint(v[SHT_AMT_DEC]))
+                            .to_string(),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn bigint_shr_byneg_test() {
+        super::build_bigint_bin("0b0") >> super::build_bigint_bin("-0b1");
+    }
+
+    #[test]
+    fn bigint_shr_test() {
+        assert_eq!(
+            "0b0",
+            (super::build_bigint_bin("0b0") >> super::build_bigint_bin("0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("0b1") >> super::build_bigint_bin("0b0")).to_string_bin()
+        );
+
+        if let Ok(lines) = read_lines("./test_inputs.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[SHR_BIN],
+                        (super::build_bigint_bin(v[A_BIN]) >> super::build_bigint_bin(v[SHT_AMT_BIN]))
+                            .to_string_bin(),
+                    );
+                    assert_eq!(
+                        v[SHR_DEC],
+                        (super::build_bigint(v[A_DEC]) >> super::build_bigint(v[SHT_AMT_DEC]))
+                            .to_string(),
                     );
                 }
             }
