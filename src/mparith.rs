@@ -533,7 +533,7 @@ fn shl(a: &BigInt, b: &BigInt) -> BigInt {
     let q: BigInt;
     let r: BigInt;
     // compiler should optimize this but move the build_bigint outside to test later
-    (q,r) = divmod(b, &build_bigint(&(isize::BITS - 2).to_string()));
+    (q, r) = divmod(b, &build_bigint(&(isize::BITS - 2).to_string()));
 
     // compiler should optimize this but move the build_bigint outside to test later
     if q.len > 2 || (q.len == 2 && q.mag[1] > 1) {
@@ -562,15 +562,15 @@ fn shl(a: &BigInt, b: &BigInt) -> BigInt {
         1 => {
             lower_bits = isize::MAX >> (1 + r.mag[0]);
             amount_shifted = r.mag[0] as u32;
-        },
+        }
         _ => {
             lower_bits = isize::MAX >> 1;
             amount_shifted = 0;
-        },
+        }
     }
     let upper_bits = (isize::MAX >> 1) ^ lower_bits;
 
-    for i in c_mag_leading_zeros..=(a.len + c_mag_leading_zeros ) {
+    for i in c_mag_leading_zeros..=(a.len + c_mag_leading_zeros) {
         let tmp = c_mag[i] & upper_bits;
         c_mag[i] = prev_pushed_val | ((c_mag[i] & lower_bits) << amount_shifted);
         prev_pushed_val = tmp >> (isize::BITS - 2 - amount_shifted);
@@ -579,7 +579,7 @@ fn shl(a: &BigInt, b: &BigInt) -> BigInt {
     if c_mag[c_len - 1] == 0 {
         c_len -= 1;
     }
-    
+
     return BigInt {
         mag: c_mag,
         len: c_len,
@@ -587,11 +587,12 @@ fn shl(a: &BigInt, b: &BigInt) -> BigInt {
     };
 }
 
+// TODO: see if making a threaded twos complement saves time
 fn shr(a: &BigInt, b: &BigInt) -> BigInt {
     let q: BigInt;
     let r: BigInt;
     // compiler should optimize this but move the build_bigint outside to test later
-    (q,r) = divmod(b, &build_bigint(&(isize::BITS - 2).to_string()));
+    (q, r) = divmod(b, &build_bigint(&(isize::BITS - 2).to_string()));
 
     let mut new_first_index: usize = 0;
     let mut big_shift = false;
@@ -610,7 +611,7 @@ fn shr(a: &BigInt, b: &BigInt) -> BigInt {
             } else {
                 new_first_index = (q.mag[0] | (1 << (isize::BITS - 2))) as usize;
             }
-        },
+        }
         _ => big_shift = true,
     }
     if big_shift || new_first_index >= a.len {
@@ -625,7 +626,6 @@ fn shr(a: &BigInt, b: &BigInt) -> BigInt {
         }
     }
 
-    
     let mut c: BigInt = BigInt {
         mag: a.mag.clone(),
         len: a.len,
@@ -648,17 +648,18 @@ fn shr(a: &BigInt, b: &BigInt) -> BigInt {
         1 => {
             upper_bits = isize::MAX >> (1 + r.mag[0]) << r.mag[0];
             amount_shifted = r.mag[0] as u32;
-        },
+        }
         _ => {
             upper_bits = isize::MAX >> 1;
             amount_shifted = 0;
-        },
+        }
     }
     let lower_bits = (isize::MAX >> 1) ^ upper_bits;
 
     let mut prev_pushed_val: isize = 0;
     if a.sgn == -1 {
-        prev_pushed_val = isize::MAX >> (isize::BITS - 1 - amount_shifted) << (isize::BITS - 2 - amount_shifted);
+        prev_pushed_val =
+            isize::MAX >> (isize::BITS - 1 - amount_shifted) << (isize::BITS - 2 - amount_shifted);
     }
     for i in (0..(c.len)).rev() {
         let tmp = c.mag[i] & lower_bits;
@@ -679,6 +680,292 @@ fn shr(a: &BigInt, b: &BigInt) -> BigInt {
     }
 
     return c;
+}
+
+// TODO: see if making a threaded twos complement saves time
+// TODO: see if threading the bitwise and saves time
+fn bitand(a: &BigInt, b: &BigInt) -> BigInt {
+    if a.len < b.len {
+        return bitand(b, a);
+    }
+
+    let neg_one: BigInt = BigInt {
+        mag: vec![1],
+        sgn: -1,
+        len: 1,
+    };
+
+    let a_mag;
+    let mut tmp_a;
+    if a.sgn != -1 {
+        a_mag = &a.mag;
+    } else {
+        tmp_a = BigInt {
+            mag: a.mag[0..(a.len)].to_vec(),
+            sgn: a.sgn,
+            len: a.len,
+        };
+        for i in 0..(a.len) {
+            tmp_a.mag[i] = tmp_a.mag[i] ^ (isize::MAX >> 1);
+        }
+        tmp_a = tmp_a + &neg_one;
+        a_mag = &tmp_a.mag;
+    }
+
+    let b_mag;
+    let mut tmp_b;
+    if b.sgn != -1 {
+        b_mag = &b.mag;
+    } else {
+        tmp_b = BigInt {
+            mag: b.mag[0..(b.len)].to_vec(),
+            sgn: b.sgn,
+            len: a.len,
+        };
+        for i in 0..(b.len) {
+            tmp_b.mag[i] = tmp_b.mag[i] ^ (isize::MAX >> 1);
+        }
+        tmp_b.mag.extend(vec![isize::MAX >> 1; a.len - b.len]);
+        tmp_b = tmp_b + &neg_one;
+        b_mag = &tmp_b.mag;
+    }
+
+    let mut c_sgn = 0;
+    match a.sgn * b.sgn {
+        1 => c_sgn = a.sgn,
+        -1 => c_sgn = 1,
+        _ => (),
+    }
+
+    let mut c_len;
+    if b.sgn == -1 {
+        c_len = a.len;
+    } else {
+        c_len = b.len;
+    }
+
+    let mut c_mag = Vec::with_capacity(c_len);
+
+    for i in 0..c_len {
+        c_mag.push(a_mag[i] & b_mag[i]);
+    }
+
+    let mut c;
+    if a.sgn == -1 && b.sgn == -1 {
+        for i in 0..c_len {
+            c_mag[i] = c_mag[i] ^ (isize::MAX >> 1);
+        }
+    }
+
+    for i in (0..c_len).rev() {
+        if c_mag[i] == 0 {
+            c_len -= 1;
+        } else {
+            break;
+        }
+    }
+
+    if c_len == 0 {
+        c_sgn = 0;
+    }
+
+    c = BigInt {
+        mag: c_mag,
+        len: c_len,
+        sgn: c_sgn,
+    };
+
+    if a.sgn == -1 && b.sgn == -1 {
+        c = c + neg_one;
+    }
+
+    return c;
+}
+
+// TODO: see if making a threaded twos complement saves time
+// TODO: see if threading the bitwise or saves time
+fn bitor(a: &BigInt, b: &BigInt) -> BigInt {
+    if a.len < b.len {
+        return bitor(b, a);
+    }
+
+    let neg_one: BigInt = BigInt {
+        mag: vec![1],
+        sgn: -1,
+        len: 1,
+    };
+
+    let a_mag;
+    let mut tmp_a;
+    if a.sgn != -1 {
+        a_mag = &a.mag;
+    } else {
+        tmp_a = BigInt {
+            mag: a.mag[0..(a.len)].to_vec(),
+            sgn: a.sgn,
+            len: a.len,
+        };
+        for i in 0..(a.len) {
+            tmp_a.mag[i] = tmp_a.mag[i] ^ (isize::MAX >> 1);
+        }
+        tmp_a = tmp_a + &neg_one;
+        a_mag = &tmp_a.mag;
+    }
+
+    let b_mag;
+    let mut tmp_b;
+    let b_len;
+    if b.sgn != -1 {
+        b_mag = &b.mag;
+        b_len = b.len;
+    } else {
+        tmp_b = BigInt {
+            mag: b.mag[0..(b.len)].to_vec(),
+            sgn: b.sgn,
+            len: a.len,
+        };
+        for i in 0..(b.len) {
+            tmp_b.mag[i] = tmp_b.mag[i] ^ (isize::MAX >> 1);
+        }
+        tmp_b.mag.extend(vec![isize::MAX >> 1; a.len - b.len]);
+        tmp_b = tmp_b + &neg_one;
+        b_mag = &tmp_b.mag;
+        b_len = a.len;
+    }
+
+    let mut c_sgn = a.sgn | b.sgn;
+    let mut c_len = a.len;
+
+    let mut c_mag = Vec::with_capacity(c_len);
+    for i in 0..b_len {
+        c_mag.push(a_mag[i] | b_mag[i]);
+    }
+    for i in b_len..c_len {
+        c_mag.push(a_mag[i]);
+    }
+
+    let mut c = BigInt {
+        mag: c_mag,
+        len: c_len,
+        sgn: c_sgn,
+    };
+
+    if c_sgn == -1 {
+        for i in 0..c_len {
+            c.mag[i] = c.mag[i] ^ (isize::MAX >> 1);
+        }
+        c = c + neg_one;
+    }
+
+    return c;
+}
+
+// TODO: see if making a threaded twos complement saves time
+// TODO: see if threading the bitwise xor saves time
+fn bitxor(a: &BigInt, b: &BigInt) -> BigInt {
+    if a.len < b.len {
+        return bitxor(b, a);
+    }
+
+    let neg_one: BigInt = BigInt {
+        mag: vec![1],
+        sgn: -1,
+        len: 1,
+    };
+
+    let a_mag;
+    let mut tmp_a;
+    if a.sgn != -1 {
+        a_mag = &a.mag;
+    } else {
+        tmp_a = BigInt {
+            mag: a.mag[0..(a.len)].to_vec(),
+            sgn: a.sgn,
+            len: a.len,
+        };
+        for i in 0..(a.len) {
+            tmp_a.mag[i] = tmp_a.mag[i] ^ (isize::MAX >> 1);
+        }
+        tmp_a = tmp_a + &neg_one;
+        a_mag = &tmp_a.mag;
+    }
+
+    let b_mag;
+    let mut tmp_b;
+    let b_len;
+    if b.sgn != -1 {
+        b_mag = &b.mag;
+        b_len = b.len;
+    } else {
+        tmp_b = BigInt {
+            mag: b.mag[0..(b.len)].to_vec(),
+            sgn: b.sgn,
+            len: a.len,
+        };
+        for i in 0..(b.len) {
+            tmp_b.mag[i] = tmp_b.mag[i] ^ (isize::MAX >> 1);
+        }
+        tmp_b.mag.extend(vec![isize::MAX >> 1; a.len - b.len]);
+        tmp_b = tmp_b + &neg_one;
+        b_mag = &tmp_b.mag;
+        b_len = a.len;
+    }
+
+    let mut c_sgn;
+    match a.sgn ^ b.sgn {
+        0 => c_sgn = 1,
+        1 => c_sgn = 1,
+        _ => c_sgn = -1,
+    }
+    let mut c_len = a.len;
+
+    let mut c_mag = Vec::with_capacity(c_len);
+    for i in 0..b_len {
+        c_mag.push(a_mag[i] ^ b_mag[i]);
+    }
+    for i in b_len..c_len {
+        c_mag.push(a_mag[i]);
+    }
+
+    let mut c;
+    if c_sgn == -1 {
+        for i in 0..c_len {
+            c_mag[i] = c_mag[i] ^ (isize::MAX >> 1);
+        }
+    }
+
+    for i in (0..c_len).rev() {
+        if c_mag[i] == 0 {
+            c_len -= 1;
+        } else {
+            break;
+        }
+    }
+
+    let c_sgn_tmp = c_sgn;
+    if c_len == 0 {
+        c_sgn = 0;
+    }
+
+    c = BigInt {
+        mag: c_mag,
+        len: c_len,
+        sgn: c_sgn,
+    };
+
+    if c_sgn_tmp == -1 {
+        c = c + neg_one;
+    }
+
+    return c;
+}
+
+fn neg(a: &BigInt) -> BigInt {
+    return BigInt {
+        mag: a.mag.clone(),
+        sgn: -a.sgn,
+        len: a.len,
+    };
 }
 
 impl ops::Add<BigInt> for BigInt {
@@ -941,6 +1228,118 @@ impl ops::Shr<&BigInt> for &BigInt {
     }
 }
 
+impl ops::BitAnd<BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn bitand(self, b: BigInt) -> BigInt {
+        bitand(&self, &b)
+    }
+}
+
+impl ops::BitAnd<&BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn bitand(self, b: &BigInt) -> BigInt {
+        bitand(&self, b)
+    }
+}
+
+impl ops::BitAnd<BigInt> for &BigInt {
+    type Output = BigInt;
+
+    fn bitand(self, b: BigInt) -> BigInt {
+        bitand(self, &b)
+    }
+}
+
+impl ops::BitAnd<&BigInt> for &BigInt {
+    type Output = BigInt;
+
+    fn bitand(self, b: &BigInt) -> BigInt {
+        bitand(self, b)
+    }
+}
+
+impl ops::BitOr<BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn bitor(self, b: BigInt) -> BigInt {
+        bitor(&self, &b)
+    }
+}
+
+impl ops::BitOr<&BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn bitor(self, b: &BigInt) -> BigInt {
+        bitor(&self, b)
+    }
+}
+
+impl ops::BitOr<BigInt> for &BigInt {
+    type Output = BigInt;
+
+    fn bitor(self, b: BigInt) -> BigInt {
+        bitor(self, &b)
+    }
+}
+
+impl ops::BitOr<&BigInt> for &BigInt {
+    type Output = BigInt;
+
+    fn bitor(self, b: &BigInt) -> BigInt {
+        bitor(self, b)
+    }
+}
+
+impl ops::BitXor<BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn bitxor(self, b: BigInt) -> BigInt {
+        bitxor(&self, &b)
+    }
+}
+
+impl ops::BitXor<&BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn bitxor(self, b: &BigInt) -> BigInt {
+        bitxor(&self, b)
+    }
+}
+
+impl ops::BitXor<BigInt> for &BigInt {
+    type Output = BigInt;
+
+    fn bitxor(self, b: BigInt) -> BigInt {
+        bitxor(self, &b)
+    }
+}
+
+impl ops::BitXor<&BigInt> for &BigInt {
+    type Output = BigInt;
+
+    fn bitxor(self, b: &BigInt) -> BigInt {
+        bitxor(self, b)
+    }
+}
+
+impl ops::Neg for BigInt {
+    type Output = BigInt;
+
+    fn neg(self) -> BigInt {
+        neg(&self)
+    }
+}
+
+impl ops::Neg for &BigInt {
+    type Output = BigInt;
+
+    fn neg(self) -> BigInt {
+        neg(self)
+    }
+}
+
 impl fmt::Display for BigInt {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt(&self, f)
@@ -1017,6 +1416,14 @@ mod tests {
     const SHL_DEC: usize = 20;
     const SHR_BIN: usize = 21;
     const SHR_DEC: usize = 22;
+    const AND_BIN: usize = 23;
+    const AND_DEC: usize = 24;
+    const OR_BIN: usize = 25;
+    const OR_DEC: usize = 26;
+    const XOR_BIN: usize = 27;
+    const XOR_DEC: usize = 28;
+    const A_NEG_BIN: usize = 29;
+    const A_NEG_DEC: usize = 30;
 
     // https://doc.rust-lang.org/rust-by-example/std_misc/file/read_lines.html
     fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
@@ -1352,8 +1759,9 @@ mod tests {
                     let v: Vec<&str> = testcase.split(',').collect();
                     assert_eq!(
                         v[SHL_BIN],
-                        (super::build_bigint_bin(v[A_BIN]) << super::build_bigint_bin(v[SHT_AMT_BIN]))
-                            .to_string_bin(),
+                        (super::build_bigint_bin(v[A_BIN])
+                            << super::build_bigint_bin(v[SHT_AMT_BIN]))
+                        .to_string_bin(),
                     );
                     assert_eq!(
                         v[SHL_DEC],
@@ -1388,17 +1796,180 @@ mod tests {
                     let v: Vec<&str> = testcase.split(',').collect();
                     assert_eq!(
                         v[SHR_BIN],
-                        (super::build_bigint_bin(v[A_BIN]) >> super::build_bigint_bin(v[SHT_AMT_BIN]))
-                            .to_string_bin(),
-                        "{0}, {1}",
-                        super::build_bigint_bin(v[A_BIN]),
-                        super::build_bigint_bin(v[SHT_AMT_BIN])
+                        (super::build_bigint_bin(v[A_BIN])
+                            >> super::build_bigint_bin(v[SHT_AMT_BIN]))
+                        .to_string_bin()
                     );
                     assert_eq!(
                         v[SHR_DEC],
                         (super::build_bigint(v[A_DEC]) >> super::build_bigint(v[SHT_AMT_DEC]))
                             .to_string(),
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bigint_bitand_test() {
+        assert_eq!(
+            "0b0",
+            (super::build_bigint_bin("0b0") & super::build_bigint_bin("0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "0b0",
+            (super::build_bigint_bin("0b1") & super::build_bigint_bin("0b0")).to_string_bin()
+        );
+        assert_eq!(
+            "0b0",
+            (super::build_bigint_bin("0b0") & super::build_bigint_bin("0b0")).to_string_bin()
+        );
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("0b1") & super::build_bigint_bin("0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("0b1") & super::build_bigint_bin("-0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("-0b1") & super::build_bigint_bin("0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "-0b1",
+            (super::build_bigint_bin("-0b1") & super::build_bigint_bin("-0b1")).to_string_bin()
+        );
+
+        if let Ok(lines) = read_lines("./test_inputs.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[AND_BIN],
+                        (super::build_bigint_bin(v[A_BIN]) & super::build_bigint_bin(v[B_BIN]))
+                            .to_string_bin()
+                    );
+                    assert_eq!(
+                        v[AND_DEC],
+                        (super::build_bigint(v[A_DEC]) & super::build_bigint(v[B_DEC])).to_string(),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bigint_bitor_test() {
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("0b0") | super::build_bigint_bin("0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("0b1") | super::build_bigint_bin("0b0")).to_string_bin()
+        );
+        assert_eq!(
+            "0b0",
+            (super::build_bigint_bin("0b0") | super::build_bigint_bin("0b0")).to_string_bin()
+        );
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("0b1") | super::build_bigint_bin("0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "-0b1",
+            (super::build_bigint_bin("0b1") | super::build_bigint_bin("-0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "-0b1",
+            (super::build_bigint_bin("-0b1") | super::build_bigint_bin("0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "-0b1",
+            (super::build_bigint_bin("-0b1") | super::build_bigint_bin("-0b1")).to_string_bin()
+        );
+
+        if let Ok(lines) = read_lines("./test_inputs.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[OR_BIN],
+                        (super::build_bigint_bin(v[A_BIN]) | super::build_bigint_bin(v[B_BIN]))
+                            .to_string_bin()
+                    );
+                    assert_eq!(
+                        v[OR_DEC],
+                        (super::build_bigint(v[A_DEC]) | super::build_bigint(v[B_DEC])).to_string(),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bigint_bitxor_test() {
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("0b0") ^ super::build_bigint_bin("0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("0b1") ^ super::build_bigint_bin("0b0")).to_string_bin()
+        );
+        assert_eq!(
+            "0b0",
+            (super::build_bigint_bin("0b0") ^ super::build_bigint_bin("0b0")).to_string_bin()
+        );
+        assert_eq!(
+            "0b0",
+            (super::build_bigint_bin("0b1") ^ super::build_bigint_bin("0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "-0b10",
+            (super::build_bigint_bin("0b1") ^ super::build_bigint_bin("-0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "-0b10",
+            (super::build_bigint_bin("-0b1") ^ super::build_bigint_bin("0b1")).to_string_bin()
+        );
+        assert_eq!(
+            "0b0",
+            (super::build_bigint_bin("-0b1") ^ super::build_bigint_bin("-0b1")).to_string_bin()
+        );
+
+        if let Ok(lines) = read_lines("./test_inputs.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[XOR_BIN],
+                        (super::build_bigint_bin(v[A_BIN]) ^ super::build_bigint_bin(v[B_BIN]))
+                            .to_string_bin()
+                    );
+                    assert_eq!(
+                        v[XOR_DEC],
+                        (super::build_bigint(v[A_DEC]) ^ super::build_bigint(v[B_DEC])).to_string(),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bigint_neg_test() {
+        assert_eq!("0b0", (-super::build_bigint_bin("0b0")).to_string_bin());
+
+        if let Ok(lines) = read_lines("./test_inputs.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[A_NEG_BIN],
+                        (-super::build_bigint_bin(v[A_BIN])).to_string_bin()
+                    );
+                    assert_eq!(v[A_NEG_DEC], (-super::build_bigint(v[A_DEC])).to_string(),);
                 }
             }
         }
