@@ -8,17 +8,21 @@ We have also implemented the comparison operations, bit operations, and negation
 ## functions
 - `build_bigint(&str)` - converts a string containing a number in decimal format into a bigint
 - `build_bigint_bin(&str)` - converts a string containing a number in binary format into a bigint
+- `pow(&BigInt, &BigInt)` - raises the left argument to the power of the right argument
 
 ## methods
 - `to_string(&self)` - converts a bigint to a string containing a number in decimal format
 - `to_string_bin(&self)` - converts a bigint to a string containing a number in binary format
+- `pow(self, BigInt)` - raises a bigint to the power of the argument provided
+- `pow(self, &BigInt)` - raises a bigint to the power of the argument provided
 
 ## testing
 Since Python supports bignums, we used the language to generate 1000 pairs of random numbers ranging from -10^100 to 10^100 (using a log scale to distribute numbers more evenly between the different orders of magnitude). 
 We then checked that these numbers with the +,-,\*,/,%,==,>,<,|,^,& operations all outputted the proper result. 
 We also added a few edge cases, mostly those involving operations that resulted in 0.
 To test the bit shifts, we generated a random number from 0-300 and shifted the first number from each of the thousand pairs by this amount.
+We then used this number from 0-300 and raised a number between 0-100 to this power (note: we are planning on testing exponentiation more extensively after implementing fast multiplication).
 
 ## future work
-We are interested in adding faster multiplication/division algorithms and adding some commonly used operations (like isqrt, exponentiation).
+We are interested in adding faster multiplication/division algorithms and adding some commonly used operations (like isqrt).
 This library is intended to be used in a future personal project involving pell equations.

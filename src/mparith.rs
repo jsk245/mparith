@@ -154,6 +154,71 @@ fn fmt(val: &BigInt, f: &mut fmt::Formatter) -> fmt::Result {
     return write!(f, "{}", s);
 }
 
+pub fn pow(a: &BigInt, b: &BigInt) -> BigInt {
+    let mut res = BigInt {
+        mag: vec![1],
+        len: 1,
+        sgn: 1,
+    };
+
+    if b.sgn == 0 {
+        return res;
+    }
+
+    if a.len == 1 && a.mag[0] == 1 {
+        match a.sgn {
+            1 => return res,
+            -1 => {
+                res.sgn = res.sgn - 2 * (1 & b.mag[0]);
+                if b.sgn == -1 && res.sgn == 1 {
+                    panic!("Do not raise -1 to a negative even power");
+                }
+                return res;
+            }
+            _ => (),
+        }
+    }
+
+    if b.sgn == -1 {
+        panic!("Do not raise a BigInt to a negative power (other than 1 and -1)")
+    }
+
+    if a.sgn == 0 {
+        res.len = 0;
+        res.sgn = 0;
+        return res;
+    }
+
+    let mut first_digit = isize::BITS - 3;
+    while ((1 << first_digit) & b.mag[b.len - 1]) == 0 {
+        first_digit -= 1;
+    }
+
+    for i in (0..=first_digit).rev() {
+        res = &res * &res;
+        if ((1 << i) & b.mag[b.len - 1]) != 0 {
+            res = &res * a;
+        }
+    }
+
+    for i in (0..(b.len - 1)).rev() {
+        for j in (0..(isize::BITS - 2)).rev() {
+            res = &res * &res;
+            if ((1 << j) & b.mag[i]) != 0 {
+                res = &res * a;
+            }
+        }
+    }
+
+    return res;
+}
+
+pub trait Pow<T> {
+    type Output;
+
+    fn pow(self, b: T) -> Self::Output;
+}
+
 impl BigInt {
     pub fn to_string_bin(&self) -> String {
         let mut s: String;
@@ -1324,6 +1389,38 @@ impl ops::BitXor<&BigInt> for &BigInt {
     }
 }
 
+impl Pow<BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn pow(self, b: BigInt) -> BigInt {
+        pow(&self, &b)
+    }
+}
+
+impl Pow<&BigInt> for BigInt {
+    type Output = BigInt;
+
+    fn pow(self, b: &BigInt) -> BigInt {
+        pow(&self, b)
+    }
+}
+
+impl Pow<BigInt> for &BigInt {
+    type Output = BigInt;
+
+    fn pow(self, b: BigInt) -> BigInt {
+        pow(self, &b)
+    }
+}
+
+impl Pow<&BigInt> for &BigInt {
+    type Output = BigInt;
+
+    fn pow(self, b: &BigInt) -> BigInt {
+        pow(self, b)
+    }
+}
+
 impl ops::Neg for BigInt {
     type Output = BigInt;
 
@@ -1390,6 +1487,7 @@ impl PartialEq for BigInt {
 
 #[cfg(test)]
 mod tests {
+    use super::Pow;
     use std::fs::File;
     use std::io::{self, BufRead};
     use std::path::Path;
@@ -1424,6 +1522,10 @@ mod tests {
     const XOR_DEC: usize = 28;
     const A_NEG_BIN: usize = 29;
     const A_NEG_DEC: usize = 30;
+    const POW_BIN: usize = 31;
+    const POW_DEC: usize = 32;
+    const TO_POW_BIN: usize = 33;
+    const TO_POW_DEC: usize = 34;
 
     // https://doc.rust-lang.org/rust-by-example/std_misc/file/read_lines.html
     fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
@@ -1970,6 +2072,67 @@ mod tests {
                         (-super::build_bigint_bin(v[A_BIN])).to_string_bin()
                     );
                     assert_eq!(v[A_NEG_DEC], (-super::build_bigint(v[A_DEC])).to_string(),);
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn bigint_pow_negone_to_evenneg_test() {
+        super::build_bigint_bin("-0b1").pow(super::build_bigint_bin("-0b10"));
+    }
+
+    #[test]
+    #[should_panic]
+    fn bigint_pow_num_to_neg_test() {
+        super::build_bigint_bin("0b10").pow(super::build_bigint_bin("-0b1"));
+    }
+
+    #[test]
+    #[should_panic]
+    fn bigint_pow_zero_to_neg_test() {
+        super::build_bigint_bin("0b0").pow(super::build_bigint_bin("-0b1"));
+    }
+
+    #[test]
+    fn bigint_pow_test() {
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("0b0").pow(super::build_bigint_bin("0b0"))).to_string_bin()
+        );
+        assert_eq!(
+            "0b0",
+            (super::build_bigint_bin("0b0").pow(super::build_bigint_bin("0b1"))).to_string_bin()
+        );
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("0b1").pow(super::build_bigint_bin("-0b1"))).to_string_bin()
+        );
+        assert_eq!(
+            "-0b1",
+            (super::build_bigint_bin("-0b1").pow(super::build_bigint_bin("-0b1"))).to_string_bin()
+        );
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("-0b1").pow(super::build_bigint_bin("0b0"))).to_string_bin()
+        );
+
+        if let Ok(lines) = read_lines("./test_inputs.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[TO_POW_BIN],
+                        (super::build_bigint_bin(v[SHT_AMT_BIN])
+                            .pow(super::build_bigint_bin(v[POW_BIN])))
+                        .to_string_bin()
+                    );
+                    assert_eq!(
+                        v[TO_POW_DEC],
+                        (super::build_bigint(v[SHT_AMT_DEC]).pow(super::build_bigint(v[POW_DEC])))
+                            .to_string(),
+                    );
                 }
             }
         }
