@@ -170,9 +170,6 @@ pub fn pow(a: &BigInt, b: &BigInt) -> BigInt {
             1 => return res,
             -1 => {
                 res.sgn = res.sgn - 2 * (1 & b.mag[0]);
-                if b.sgn == -1 && res.sgn == 1 {
-                    panic!("Do not raise -1 to a negative even power");
-                }
                 return res;
             }
             _ => (),
@@ -2079,12 +2076,6 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn bigint_pow_negone_to_evenneg_test() {
-        super::build_bigint_bin("-0b1").pow(super::build_bigint_bin("-0b10"));
-    }
-
-    #[test]
-    #[should_panic]
     fn bigint_pow_num_to_neg_test() {
         super::build_bigint_bin("0b10").pow(super::build_bigint_bin("-0b1"));
     }
@@ -2108,6 +2099,10 @@ mod tests {
         assert_eq!(
             "0b1",
             (super::build_bigint_bin("0b1").pow(super::build_bigint_bin("-0b1"))).to_string_bin()
+        );
+        assert_eq!(
+            "0b1",
+            (super::build_bigint_bin("-0b1").pow(super::build_bigint_bin("-0b10"))).to_string_bin()
         );
         assert_eq!(
             "-0b1",
