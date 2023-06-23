@@ -210,10 +210,119 @@ pub fn pow(a: &BigInt, b: &BigInt) -> BigInt {
     return res;
 }
 
+pub fn isqrt(n: &BigInt) -> BigInt {
+    // This is based on the Python implementation of isqrt
+    // The runtime of this algorithm is floor(log(log(a))), 
+    // and a proof of correctness is provided by Python here:
+    // https://github.com/python/cpython/blob/main/Modules/mathmodule.c#L1487
+    if n.sgn == -1 {
+        panic!("Do not take the square root of a negative number");
+    }
+    if n.sgn == 0 {
+        return BigInt {
+            mag: vec![],
+            len: 0,
+            sgn: 0,
+        };
+    }
+
+    let mut first_digit: isize = isize::BITS as isize - 3;
+    while ((1 << first_digit) & n.mag[n.len - 1]) == 0 {
+        first_digit -= 1;
+    }
+
+    let one = BigInt {
+        mag: vec![1],
+        len: 1,
+        sgn: 1,
+    };
+    
+    let mut c: isize = ((isize::BITS as isize - 2) * (n.len as isize - 1) + first_digit) / 2;
+    if c == 0 {
+        return one;
+    }
+
+    let mut a = BigInt {
+        mag: vec![1],
+        len: 1,
+        sgn: 1,
+    };
+    
+    let mut tmp1: BigInt;
+    let mut tmp2: BigInt;
+    let mut d: isize = 0;
+    let mut e: isize;
+
+    first_digit = isize::BITS as isize - 1;
+    while (1 << (first_digit - 1)) & c == 0 {
+        first_digit -= 1;
+    }
+
+    for s in (0..first_digit).rev() {
+        e = d;
+        d = c >> s;
+
+        if d-e-1 == 0 {
+            tmp1 = BigInt {
+                mag: vec![],
+                len: 0,
+                sgn: 0,
+            };
+        } else {
+            tmp1 = BigInt {
+                mag: vec![d-e-1],
+                len: 1,
+                sgn: 1,
+            };
+        }
+
+        if 2*c - e - d + 1 == 0 {
+            tmp2 = BigInt {
+                mag: vec![],
+                len: 0,
+                sgn: 0,
+            };
+        } else {
+            tmp2 = BigInt {
+                mag: vec![2*c - e - d + 1],
+                len: 1,
+                sgn: 1,
+            };
+        }
+
+        a = (&a << &tmp1) + (n >> &tmp2) / &a;
+    }
+
+    if &a * &a > *n {
+        a = &a - one;
+    }
+    return a;
+}
+
+pub fn abs(a: &BigInt) -> BigInt {
+    return BigInt {
+        mag: a.mag.clone(),
+        sgn: a.sgn & 1,
+        len: a.len,
+    };
+}
+
 pub trait Pow<T> {
     type Output;
 
     fn pow(self, b: T) -> Self::Output;
+}
+
+pub trait ISqrt {
+    type Output;
+
+    fn isqrt(self) -> Self::Output;
+}
+
+pub trait Abs {
+    type Output;
+
+    fn abs(self) -> Self::Output;
 }
 
 impl BigInt {
@@ -1434,6 +1543,38 @@ impl ops::Neg for &BigInt {
     }
 }
 
+impl Abs for BigInt {
+    type Output = BigInt;
+
+    fn abs(self) -> BigInt {
+        abs(&self)
+    }
+}
+
+impl Abs for &BigInt {
+    type Output = BigInt;
+
+    fn abs(self) -> BigInt {
+        abs(self)
+    }
+}
+
+impl ISqrt for BigInt {
+    type Output = BigInt;
+
+    fn isqrt(self) -> BigInt {
+        isqrt(&self)
+    }
+}
+
+impl ISqrt for &BigInt {
+    type Output = BigInt;
+
+    fn isqrt(self) -> BigInt {
+        isqrt(self)
+    }
+}
+
 impl fmt::Display for BigInt {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt(&self, f)
@@ -1485,6 +1626,8 @@ impl PartialEq for BigInt {
 #[cfg(test)]
 mod tests {
     use super::Pow;
+    use super::Abs;
+    use super::ISqrt;
     use std::fs::File;
     use std::io::{self, BufRead};
     use std::path::Path;
@@ -1523,6 +1666,10 @@ mod tests {
     const POW_DEC: usize = 32;
     const TO_POW_BIN: usize = 33;
     const TO_POW_DEC: usize = 34;
+    const A_ABS_BIN: usize = 35;
+    const A_ABS_DEC: usize = 36;
+    const A_ABS_ISQRT_BIN: usize = 37;
+    const A_ABS_ISQRT_DEC: usize = 38;
 
     // https://doc.rust-lang.org/rust-by-example/std_misc/file/read_lines.html
     fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
@@ -2128,6 +2275,48 @@ mod tests {
                         (super::build_bigint(v[SHT_AMT_DEC]).pow(super::build_bigint(v[POW_DEC])))
                             .to_string(),
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bigint_abs_test() {
+        assert_eq!("0b0", (super::build_bigint_bin("0b0").abs()).to_string_bin());
+
+        if let Ok(lines) = read_lines("./test_inputs.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[A_ABS_BIN],
+                        (super::build_bigint_bin(v[A_BIN]).abs()).to_string_bin()
+                    );
+                    assert_eq!(v[A_ABS_DEC], (super::build_bigint(v[A_DEC]).abs()).to_string());
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn bigint_isqrt_neg_test() {
+        super::build_bigint_bin("-0b1").isqrt();
+    }
+    
+    #[test]
+    fn bigint_isqrt_test() {
+        assert_eq!("0b0", (super::build_bigint_bin("0b0").abs().isqrt()).to_string_bin());
+
+        if let Ok(lines) = read_lines("./test_inputs.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[A_ABS_ISQRT_BIN],
+                        (super::build_bigint_bin(v[A_BIN]).abs().isqrt()).to_string_bin()
+                    );
+                    assert_eq!(v[A_ABS_ISQRT_DEC], (super::build_bigint(v[A_DEC]).abs().isqrt()).to_string());
                 }
             }
         }
