@@ -18,7 +18,7 @@ We have also implemented the comparison operations, bit operations, and negation
 - `pow(self, BigInt)` - raises a bigint to the power of the argument provided
 - `pow(self, &BigInt)` - raises a bigint to the power of the argument provided
 - `abs(self)` - returns the absolute value of a bigint
-- `isqrt(&self)` - returns the floor of the square root of a bigint
+- `isqrt(self)` - returns the floor of the square root of a bigint
 
 ## testing
 Since Python supports bignums, we used the language to generate 1000 pairs of random numbers ranging from -10^100 to 10^100 (using a log scale to distribute numbers more evenly between the different orders of magnitude). 
