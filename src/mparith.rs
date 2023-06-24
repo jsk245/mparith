@@ -1,8 +1,10 @@
 use std::cmp::Ordering;
+use std::cmp::{max, min};
 use std::fmt;
 use std::ops;
 
 const B: isize = 1 << (isize::BITS - 2);
+const KARATSUBA_CUTOFF: usize = 80;
 
 #[derive(Debug)]
 pub struct BigInt {
@@ -186,10 +188,7 @@ pub fn pow(a: &BigInt, b: &BigInt) -> BigInt {
         return res;
     }
 
-    let mut first_digit = isize::BITS - 3;
-    while ((1 << first_digit) & b.mag[b.len - 1]) == 0 {
-        first_digit -= 1;
-    }
+    let mut first_digit = b.mag[b.len - 1].ilog(2);
 
     for i in (0..=first_digit).rev() {
         res = &res * &res;
@@ -212,7 +211,7 @@ pub fn pow(a: &BigInt, b: &BigInt) -> BigInt {
 
 pub fn isqrt(n: &BigInt) -> BigInt {
     // This is based on the Python implementation of isqrt
-    // The runtime of this algorithm is floor(log(log(a))), 
+    // The runtime of this algorithm is floor(log(log(a))),
     // and a proof of correctness is provided by Python here:
     // https://github.com/python/cpython/blob/main/Modules/mathmodule.c#L1487
     if n.sgn == -1 {
@@ -226,17 +225,14 @@ pub fn isqrt(n: &BigInt) -> BigInt {
         };
     }
 
-    let mut first_digit: isize = isize::BITS as isize - 3;
-    while ((1 << first_digit) & n.mag[n.len - 1]) == 0 {
-        first_digit -= 1;
-    }
+    let mut first_digit: isize = n.mag[n.len - 1].ilog(2) as isize;
 
     let one = BigInt {
         mag: vec![1],
         len: 1,
         sgn: 1,
     };
-    
+
     let mut c: isize = ((isize::BITS as isize - 2) * (n.len as isize - 1) + first_digit) / 2;
     if c == 0 {
         return one;
@@ -247,22 +243,19 @@ pub fn isqrt(n: &BigInt) -> BigInt {
         len: 1,
         sgn: 1,
     };
-    
+
     let mut tmp1: BigInt;
     let mut tmp2: BigInt;
     let mut d: isize = 0;
     let mut e: isize;
 
-    first_digit = isize::BITS as isize - 1;
-    while (1 << (first_digit - 1)) & c == 0 {
-        first_digit -= 1;
-    }
+    first_digit = c.ilog(2) as isize + 1;
 
     for s in (0..first_digit).rev() {
         e = d;
         d = c >> s;
 
-        if d-e-1 == 0 {
+        if d - e - 1 == 0 {
             tmp1 = BigInt {
                 mag: vec![],
                 len: 0,
@@ -270,13 +263,13 @@ pub fn isqrt(n: &BigInt) -> BigInt {
             };
         } else {
             tmp1 = BigInt {
-                mag: vec![d-e-1],
+                mag: vec![d - e - 1],
                 len: 1,
                 sgn: 1,
             };
         }
 
-        if 2*c - e - d + 1 == 0 {
+        if 2 * c - e - d + 1 == 0 {
             tmp2 = BigInt {
                 mag: vec![],
                 len: 0,
@@ -284,7 +277,7 @@ pub fn isqrt(n: &BigInt) -> BigInt {
             };
         } else {
             tmp2 = BigInt {
-                mag: vec![2*c - e - d + 1],
+                mag: vec![2 * c - e - d + 1],
                 len: 1,
                 sgn: 1,
             };
@@ -554,6 +547,50 @@ fn mul(a: &BigInt, b: &BigInt) -> BigInt {
         sgn: c_sgn,
         len: c_len,
     }
+}
+
+fn karatsuba_helper(a: &BigInt, b: &BigInt) -> BigInt {
+    let max_len = max(a.len, b.len);
+    let n;
+    match max_len & 1 {
+        0 => n = max_len >> 1,
+        _ => n = (max_len + 1) >> 1,
+    }
+
+    let shift = BigInt {
+        mag: vec![(n * (isize::BITS as usize - 2)) as isize],
+        len: 1,
+        sgn: 1,
+    };
+
+    let a_upper = a >> &shift;
+    let b_upper = b >> &shift;
+    let a_lower = BigInt {
+        mag: a.mag[0..min(a.len, n)].to_vec(),
+        sgn: 1,
+        len: min(a.len, n),
+    };
+    let b_lower = BigInt {
+        mag: b.mag[0..min(b.len, n)].to_vec(),
+        sgn: 1,
+        len: min(b.len, n),
+    };
+
+    let mut tmp = &a_upper * &b_upper;
+    let mut res = (&tmp << &shift << &shift) + (&tmp << &shift);
+
+    tmp = &a_lower * &b_lower;
+    tmp = &tmp + (&tmp << &shift);
+    res = &res + &tmp;
+
+    tmp = (a_upper - a_lower) * (b_lower - b_upper);
+    return res + (tmp << shift);
+}
+
+fn karatsuba(a: &BigInt, b: &BigInt) -> BigInt {
+    let mut c = karatsuba_helper(&a.abs(), &b.abs());
+    c.sgn = a.sgn * b.sgn;
+    return c;
 }
 
 fn divmod(a: &BigInt, b: &BigInt) -> (BigInt, BigInt) {
@@ -1207,7 +1244,11 @@ impl ops::Mul<BigInt> for BigInt {
     type Output = BigInt;
 
     fn mul(self, b: BigInt) -> BigInt {
-        mul(&self, &b)
+        if self.len >= KARATSUBA_CUTOFF && b.len >= KARATSUBA_CUTOFF {
+            return karatsuba(&self, &b);
+        } else {
+            return mul(&self, &b);
+        }
     }
 }
 
@@ -1215,7 +1256,11 @@ impl ops::Mul<&BigInt> for BigInt {
     type Output = BigInt;
 
     fn mul(self, b: &BigInt) -> BigInt {
-        mul(&self, b)
+        if self.len >= KARATSUBA_CUTOFF && b.len >= KARATSUBA_CUTOFF {
+            return karatsuba(&self, b);
+        } else {
+            return mul(&self, b);
+        }
     }
 }
 
@@ -1223,7 +1268,11 @@ impl ops::Mul<BigInt> for &BigInt {
     type Output = BigInt;
 
     fn mul(self, b: BigInt) -> BigInt {
-        mul(self, &b)
+        if self.len >= KARATSUBA_CUTOFF && b.len >= KARATSUBA_CUTOFF {
+            return karatsuba(self, &b);
+        } else {
+            return mul(self, &b);
+        }
     }
 }
 
@@ -1231,7 +1280,11 @@ impl ops::Mul<&BigInt> for &BigInt {
     type Output = BigInt;
 
     fn mul(self, b: &BigInt) -> BigInt {
-        mul(self, b)
+        if self.len >= KARATSUBA_CUTOFF && b.len >= KARATSUBA_CUTOFF {
+            return karatsuba(self, b);
+        } else {
+            return mul(self, b);
+        }
     }
 }
 
@@ -1625,9 +1678,9 @@ impl PartialEq for BigInt {
 
 #[cfg(test)]
 mod tests {
-    use super::Pow;
     use super::Abs;
     use super::ISqrt;
+    use super::Pow;
     use std::fs::File;
     use std::io::{self, BufRead};
     use std::path::Path;
@@ -2282,7 +2335,10 @@ mod tests {
 
     #[test]
     fn bigint_abs_test() {
-        assert_eq!("0b0", (super::build_bigint_bin("0b0").abs()).to_string_bin());
+        assert_eq!(
+            "0b0",
+            (super::build_bigint_bin("0b0").abs()).to_string_bin()
+        );
 
         if let Ok(lines) = read_lines("./test_inputs.txt") {
             for line in lines {
@@ -2292,7 +2348,10 @@ mod tests {
                         v[A_ABS_BIN],
                         (super::build_bigint_bin(v[A_BIN]).abs()).to_string_bin()
                     );
-                    assert_eq!(v[A_ABS_DEC], (super::build_bigint(v[A_DEC]).abs()).to_string());
+                    assert_eq!(
+                        v[A_ABS_DEC],
+                        (super::build_bigint(v[A_DEC]).abs()).to_string()
+                    );
                 }
             }
         }
@@ -2303,10 +2362,13 @@ mod tests {
     fn bigint_isqrt_neg_test() {
         super::build_bigint_bin("-0b1").isqrt();
     }
-    
+
     #[test]
     fn bigint_isqrt_test() {
-        assert_eq!("0b0", (super::build_bigint_bin("0b0").abs().isqrt()).to_string_bin());
+        assert_eq!(
+            "0b0",
+            (super::build_bigint_bin("0b0").abs().isqrt()).to_string_bin()
+        );
 
         if let Ok(lines) = read_lines("./test_inputs.txt") {
             for line in lines {
@@ -2316,7 +2378,50 @@ mod tests {
                         v[A_ABS_ISQRT_BIN],
                         (super::build_bigint_bin(v[A_BIN]).abs().isqrt()).to_string_bin()
                     );
-                    assert_eq!(v[A_ABS_ISQRT_DEC], (super::build_bigint(v[A_DEC]).abs().isqrt()).to_string());
+                    assert_eq!(
+                        v[A_ABS_ISQRT_DEC],
+                        (super::build_bigint(v[A_DEC]).abs().isqrt()).to_string()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bigint_gradeschool_speed_test() {
+        if let Ok(lines) = read_lines("./mul.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[2],
+                        (super::mul(
+                            &super::build_bigint_bin(v[0]),
+                            &super::build_bigint_bin(v[1])
+                        ))
+                        .to_string_bin()
+                    );
+                }
+            }
+        }
+    }
+    
+    #[test]
+    #[ignore]
+    fn bigint_karatsuba_speed_test() {
+        if let Ok(lines) = read_lines("./mul.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[2],
+                        (super::karatsuba(
+                            &super::build_bigint_bin(v[0]),
+                            &super::build_bigint_bin(v[1])
+                        ))
+                        .to_string_bin()
+                    );
                 }
             }
         }
