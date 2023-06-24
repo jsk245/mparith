@@ -28,6 +28,9 @@ We also added a few edge cases, mostly those involving operations that resulted 
 To test the bit shifts, we generated a random number from 0-300 and shifted the first number from each of the thousand pairs by this amount.
 We then used this number from 0-300 and raised a number between 0-100 to this power (note: we are planning on testing exponentiation more extensively after implementing fast multiplication).
 
+Since we have not added threading yet, we have not experimented with finding a cutoff on the size of the bigint used to determine whether to use gradeschool vs karatsuba multiplication.
+However, we have provided mul.txt which contains 100 pairs of numbers each in the range [2**(62 * 249), 2**(62 * 250) - 1] to show that multiplying these numbers using karatsuba is faster as expected.
+
 ## future work
 We are interested in adding faster multiplication/division algorithms and threading to the already implemented functions.
 This library is intended to be used in a future personal project involving pell equations.
