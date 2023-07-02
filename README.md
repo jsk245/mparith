@@ -2,8 +2,8 @@
 Multi-precision arithmetic allows users to work with integers that cannot fit in the primitive types. 
 To avoid these limits, we store integers in a vector and treat each number as being a digit in some appropriate base.
 For example, if we stored the number 2^32 in base 2^32, our vector might look something like [1,0] to represent 1 * 2^32 + 0 * 2^0.
-To implement the addition, subtraction, division, and multiplication operations, we have based our implementations off of those described in Hans Riesel's "Prime Numbers and Computer Methods for Factorization".
-We have also implemented the comparison operations, bit operations, and negation (ie a = -a is computed differently than a = -1 * a).
+To implement the addition, subtraction, division, and multiplication operations, we have based our implementations off of those described in Hans Riesel's "Prime Numbers and Computer Methods for Factorization" and Donald Knuth's TAOCP.
+We have also implemented the comparison operations, bit operations, exponentiation, isqrt, and negation (ie a = -a is computed differently than a = -1 * a).
 
 ## functions
 - `build_bigint(&str)` - converts a string containing a number in decimal format into a bigint
@@ -28,9 +28,8 @@ We also added a few edge cases, mostly those involving operations that resulted 
 To test the bit shifts, we generated a random number from 0-300 and shifted the first number from each of the thousand pairs by this amount.
 We then used this number from 0-300 and raised a number between 0-100 to this power (note: we are planning on testing exponentiation more extensively after implementing fast multiplication).
 
-Since we have not added threading yet, we have not experimented with finding a cutoff on the size of the bigint used to determine whether to use gradeschool vs karatsuba multiplication.
-However, we have provided mul.txt which contains 100 pairs of numbers each in the range [2**(62 * 249), 2**(62 * 250) - 1] to show that multiplying these numbers using karatsuba is faster as expected.
+We have provided mul.txt which contains 100 pairs of numbers each in the range [2**(62 * 249), 2**(62 * 250) - 1] to show that multiplying these numbers using karatsuba is faster as expected, but the exact cutoff to use karatsuba vs gradeschool multiplication hasn't been determined yet.
 
 ## future work
-We are interested in adding faster multiplication/division algorithms and threading to the already implemented functions.
+We are interested in adding faster multiplication/division algorithms and determining the cutoffs to be used for each algorithm.
 This library is intended to be used in a future personal project involving pell equations.

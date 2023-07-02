@@ -188,7 +188,7 @@ pub fn pow(a: &BigInt, b: &BigInt) -> BigInt {
         return res;
     }
 
-    let mut first_digit = b.mag[b.len - 1].ilog(2);
+    let first_digit = b.mag[b.len - 1].ilog(2);
 
     for i in (0..=first_digit).rev() {
         res = &res * &res;
@@ -233,7 +233,7 @@ pub fn isqrt(n: &BigInt) -> BigInt {
         sgn: 1,
     };
 
-    let mut c: isize = ((isize::BITS as isize - 2) * (n.len as isize - 1) + first_digit) / 2;
+    let c: isize = ((isize::BITS as isize - 2) * (n.len as isize - 1) + first_digit) / 2;
     if c == 0 {
         return one;
     }
@@ -357,7 +357,6 @@ impl BigInt {
             self.sgn = -self.sgn;
         }
 
-        //TODO: test speedup of reducing base + changing loop structure
         for _ in 0..2 {
             for j in 0..=end {
                 if self.mag[j] < 0 {
@@ -421,7 +420,6 @@ fn addsub(a: &BigInt, b: &BigInt, sgn: isize) -> BigInt {
 
     c_mag = Vec::with_capacity(max + 1);
 
-    // TODO: test threading for these 2 loops
     for i in 0..min {
         c_mag.push(a.mag[i] + s * b.mag[i]);
     }
@@ -610,7 +608,7 @@ fn divmod(a: &BigInt, b: &BigInt) -> (BigInt, BigInt) {
     }
 
     // for approximation of q
-    let B_fp: f64 = B as f64;
+    let base_fp: f64 = B as f64;
 
     // will be used to store results of division and will eventually be the quotient
     let mut q: BigInt = BigInt {
@@ -641,7 +639,7 @@ fn divmod(a: &BigInt, b: &BigInt) -> (BigInt, BigInt) {
 
     match b.len {
         1 => br = b.mag[0] as f64,
-        _ => br = b.mag[b.len - 1] as f64 + (b.mag[b.len - 2] as f64) / B_fp,
+        _ => br = b.mag[b.len - 1] as f64 + (b.mag[b.len - 2] as f64) / base_fp,
     }
 
     while s >= b.len {
@@ -659,14 +657,14 @@ fn divmod(a: &BigInt, b: &BigInt) -> (BigInt, BigInt) {
         j = r.len - b.len;
         ar = r.mag[s - 1] as f64;
         if s > 1 {
-            ar += (r.mag[s - 2] as f64) / B_fp;
+            ar += (r.mag[s - 2] as f64) / base_fp;
         }
         qr = ar / br;
         if qr < 1.0 {
             if j == 0 {
                 break;
             }
-            qr = qr * B_fp;
+            qr = qr * base_fp;
             j -= 1;
             if qr < 1.0 {
                 qr = 1.0;
@@ -795,11 +793,9 @@ fn shl(a: &BigInt, b: &BigInt) -> BigInt {
     };
 }
 
-// TODO: see if making a threaded twos complement saves time
 fn shr(a: &BigInt, b: &BigInt) -> BigInt {
     let q: BigInt;
     let r: BigInt;
-    // compiler should optimize this but move the build_bigint outside to test later
     (q, r) = divmod(b, &build_bigint(&(isize::BITS - 2).to_string()));
 
     let mut new_first_index: usize = 0;
@@ -890,8 +886,6 @@ fn shr(a: &BigInt, b: &BigInt) -> BigInt {
     return c;
 }
 
-// TODO: see if making a threaded twos complement saves time
-// TODO: see if threading the bitwise and saves time
 fn bitand(a: &BigInt, b: &BigInt) -> BigInt {
     if a.len < b.len {
         return bitand(b, a);
@@ -990,8 +984,6 @@ fn bitand(a: &BigInt, b: &BigInt) -> BigInt {
     return c;
 }
 
-// TODO: see if making a threaded twos complement saves time
-// TODO: see if threading the bitwise or saves time
 fn bitor(a: &BigInt, b: &BigInt) -> BigInt {
     if a.len < b.len {
         return bitor(b, a);
@@ -1041,8 +1033,8 @@ fn bitor(a: &BigInt, b: &BigInt) -> BigInt {
         b_len = a.len;
     }
 
-    let mut c_sgn = a.sgn | b.sgn;
-    let mut c_len = a.len;
+    let c_sgn = a.sgn | b.sgn;
+    let c_len = a.len;
 
     let mut c_mag = Vec::with_capacity(c_len);
     for i in 0..b_len {
@@ -1068,8 +1060,6 @@ fn bitor(a: &BigInt, b: &BigInt) -> BigInt {
     return c;
 }
 
-// TODO: see if making a threaded twos complement saves time
-// TODO: see if threading the bitwise xor saves time
 fn bitxor(a: &BigInt, b: &BigInt) -> BigInt {
     if a.len < b.len {
         return bitxor(b, a);
@@ -1909,7 +1899,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn bigint_div_byzero_test() {
-        super::build_bigint_bin("0b0") / super::build_bigint_bin("0b0");
+        let _ = super::build_bigint_bin("0b0") / super::build_bigint_bin("0b0");
     }
 
     #[test]
@@ -1954,13 +1944,13 @@ mod tests {
     #[test]
     #[should_panic]
     fn bigint_rem_byzero_test() {
-        super::build_bigint_bin("0b0") % super::build_bigint_bin("0b0");
+        let _ = super::build_bigint_bin("0b0") % super::build_bigint_bin("0b0");
     }
 
     #[test]
     #[should_panic]
     fn bigint_rem_byneg_test() {
-        super::build_bigint_bin("0b0") % super::build_bigint_bin("-0b1");
+        let _ = super::build_bigint_bin("0b0") % super::build_bigint_bin("-0b1");
     }
 
     #[test]
@@ -2038,7 +2028,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn bigint_shl_byneg_test() {
-        super::build_bigint_bin("0b0") << super::build_bigint_bin("-0b1");
+        let _ = super::build_bigint_bin("0b0") << super::build_bigint_bin("-0b1");
     }
 
     #[test]
@@ -2075,7 +2065,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn bigint_shr_byneg_test() {
-        super::build_bigint_bin("0b0") >> super::build_bigint_bin("-0b1");
+        let _ = super::build_bigint_bin("0b0") >> super::build_bigint_bin("-0b1");
     }
 
     #[test]
@@ -2277,13 +2267,13 @@ mod tests {
     #[test]
     #[should_panic]
     fn bigint_pow_num_to_neg_test() {
-        super::build_bigint_bin("0b10").pow(super::build_bigint_bin("-0b1"));
+        let _ = super::build_bigint_bin("0b10").pow(super::build_bigint_bin("-0b1"));
     }
 
     #[test]
     #[should_panic]
     fn bigint_pow_zero_to_neg_test() {
-        super::build_bigint_bin("0b0").pow(super::build_bigint_bin("-0b1"));
+        let _ = super::build_bigint_bin("0b0").pow(super::build_bigint_bin("-0b1"));
     }
 
     #[test]
@@ -2360,7 +2350,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn bigint_isqrt_neg_test() {
-        super::build_bigint_bin("-0b1").isqrt();
+        let _ = super::build_bigint_bin("-0b1").isqrt();
     }
 
     #[test]
@@ -2406,7 +2396,7 @@ mod tests {
             }
         }
     }
-    
+
     #[test]
     #[ignore]
     fn bigint_karatsuba_speed_test() {
