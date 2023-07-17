@@ -5,6 +5,7 @@ use std::ops;
 
 const B: isize = 1 << (isize::BITS - 2);
 const KARATSUBA_CUTOFF: usize = 80;
+//const TOOM_COOK_CUTOFF: usize = usize::MAX;
 
 #[derive(Debug)]
 pub struct BigInt {
@@ -381,6 +382,17 @@ impl BigInt {
         }
         self.len = end + 1;
     }
+
+    fn rm_leading_zeros(&mut self) {
+        let mut end = self.len;
+        while end > 0 && self.mag[end - 1] == 0 {
+            end -= 1;
+        }
+        self.len = end;
+        if self.len == 0 {
+            self.sgn = 0;
+        }
+    }
 }
 
 fn addsub(a: &BigInt, b: &BigInt, sgn: isize) -> BigInt {
@@ -529,12 +541,12 @@ fn mul(a: &BigInt, b: &BigInt) -> BigInt {
     }
 
     for i in 0..(cc_len - 1) {
-        cc_mag[i + 1] = cc_mag[i + 1] + (cc_mag[i] >> (isize::BITS / 2 - 1) & lower_bits);
+        cc_mag[i + 1] = cc_mag[i + 1] + (cc_mag[i] >> (isize::BITS / 2 - 1));
         cc_mag[i] = cc_mag[i] & lower_bits;
     }
 
     for i in 0..c_len {
-        cc_mag[i] = cc_mag[2 * i] + (cc_mag[2 * i + 1] << (isize::BITS / 2 - 1));
+        cc_mag[i] = cc_mag[2 * i] | (cc_mag[2 * i + 1] << (isize::BITS / 2 - 1));
     }
     if cc_mag[c_len - 1] == 0 {
         c_len -= 1;
@@ -590,6 +602,345 @@ fn karatsuba(a: &BigInt, b: &BigInt) -> BigInt {
     c.sgn = a.sgn * b.sgn;
     return c;
 }
+
+fn get_toom_cook_poly_evals(w: BigInt, r: usize, q: usize) -> Vec<BigInt> {
+    let mut stack_w = Vec::new();
+    let mut w_parts = Vec::new();
+    for i in 0..(r + 1) {
+        let mut tmp = build_bigint_bin("0b0");
+        if w.len > q * i {
+            tmp = BigInt {
+                mag: w.mag[(q * i)..min(w.len, q * (i + 1))].to_vec(),
+                sgn: 1,
+                len: min(w.len, q * (i + 1)) - q * i,
+            };
+            tmp.rm_leading_zeros();
+        }
+        w_parts.push(tmp);
+    }
+
+    for i in 0..(2 * r + 1) {
+        let mut i_bigint = BigInt {
+            mag: vec![(i as isize) & (B - 1), (i as isize) & B],
+            len: 2,
+            sgn: 1,
+        };
+        i_bigint.rm_leading_zeros();
+        let zero = build_bigint_bin("0b0");
+        let mut tmp = &w_parts[r] + zero;
+
+        for j in (0..r).rev() {
+            tmp = &tmp * &i_bigint;
+            tmp = &tmp + &w_parts[j];
+        }
+        stack_w.push(tmp);
+    }
+    return stack_w;
+}
+
+pub fn toom_cook(a: &BigInt, b: &BigInt) -> BigInt {
+    // note: The Toom-Cook algorithm works by splitting a and b into appropriately sized pieces.
+    // This implementation splits based on the size of the vectors used to store a and b, 
+    // but Knuth's Algorithm T in TAOCP splits based on the number of bits.
+    // An implentation based on the bits is commented out right below this code.
+    let mut k: usize = 1;
+    let mut q_list: Vec<usize> = vec![16, 16];
+    let mut r_list: Vec<usize> = vec![4, 4];
+
+    let mut q_pow: usize = 4;
+    let mut r_pow: usize = 2;
+
+    let n = max(a.len, b.len);
+
+    while q_list[k] + q_list[k - 1] < n {
+        k += 1;
+        q_pow += r_pow;
+        if (r_pow + 1).pow(2) <= q_pow {
+            r_pow += 1;
+        }
+        q_list.push(1 << q_pow);
+        r_list.push(1 << r_pow);
+    }
+
+    let code_1: BigInt = BigInt {
+        mag: vec![],
+        len: 0,
+        sgn: 2,
+    };
+    let code_2: BigInt = BigInt {
+        mag: vec![],
+        len: 0,
+        sgn: 3,
+    };
+    let code_3: BigInt = BigInt {
+        mag: vec![],
+        len: 0,
+        sgn: 4,
+    };
+
+    let mut stack_c = Vec::new();
+    stack_c.push(code_1);
+    stack_c.push(a.abs());
+    stack_c.push(b.abs());
+
+    let mut w: BigInt;
+    let mut stack_w = Vec::new();
+    let zero = build_bigint_bin("0b0");
+
+    'outer: loop {
+        k -= 1;
+        if k > 0 {
+            let r = r_list[k];
+            let q = q_list[k];
+            let u = stack_c.pop().unwrap();
+            let mut stack_u = get_toom_cook_poly_evals(u, r, q);
+            let v = stack_c.pop().unwrap();
+            let mut stack_v = get_toom_cook_poly_evals(v, r, q);
+
+            stack_c.push(&code_2 + &zero);
+            stack_c.push(stack_v.pop().unwrap());
+            stack_c.push(stack_u.pop().unwrap());
+
+            for _ in 0..(2 * r) {
+                stack_c.push(&code_3 + &zero);
+                stack_c.push(stack_v.pop().unwrap());
+                stack_c.push(stack_u.pop().unwrap());
+            }
+        } else {
+            w = stack_c.pop().unwrap() * stack_c.pop().unwrap();
+
+            'inner: loop {
+                k += 1;
+                let code = stack_c.pop().unwrap();
+                if code.sgn == 2 {
+                    break 'outer;
+                } else if code.sgn == 4 {
+                    stack_w.push(w);
+                    break 'inner;
+                } else {
+                    stack_w.push(w);
+                    let r = r_list[k];
+                    let q = q_list[k];
+
+                    let mut tmp_stack = Vec::new();
+                    for _ in 0..(2*r+1) {
+                        tmp_stack.push(stack_w.pop().unwrap());
+                    }
+
+                    let mut mystack = Vec::new();
+                    for _ in 0..(2*r+1) {
+                        mystack.push(tmp_stack.pop().unwrap());
+                    }
+
+                    for j in 1..(2 * r + 1) {
+                        let mut j_bigint = BigInt {
+                            mag: vec![(j as isize) & (B - 1), (j as isize) & B],
+                            len: 2,
+                            sgn: 1,
+                        };
+                        j_bigint.rm_leading_zeros();
+                        for t in (j..(2 * r + 1)).rev() {
+                            //very slow
+                            //println!("{0}, {1}", &mystack[t] - &mystack[t-1], j_bigint);
+                            mystack[t] = (&mystack[t] - &mystack[t - 1]) / &j_bigint;
+                            //println!("executed");
+                        }
+                    }
+
+                    for j in (1..(2 * r)).rev() {
+                        let mut j_bigint = BigInt {
+                            mag: vec![(j as isize) & (B - 1), (j as isize) & B],
+                            len: 2,
+                            sgn: 1,
+                        };
+                        j_bigint.rm_leading_zeros();
+                        for t in j..(2 * r) {
+                            mystack[t] = &mystack[t] - &j_bigint * &mystack[t + 1];
+                        }
+                    }
+
+                    w = build_bigint("0");
+                    for _ in 0..(2 * r + 1) {
+                        if w.sgn != 0 {
+                            w.len += q;
+                            let mut tmp = vec![0_isize;q];
+                            tmp.extend(w.mag);
+                            w.mag = tmp;
+                        }
+                        w = &w + mystack.pop().unwrap();
+                    }
+                }
+            }
+        }
+    }
+
+    w.sgn = a.sgn * b.sgn;
+    return w;
+}
+
+/*fn get_toom_cook_poly_evals(w: &BigInt, r: &BigInt, q: &BigInt) -> Vec<BigInt> {
+    let mut stack_w = Vec::new();
+    let mut w_parts = Vec::new();
+    let zero = build_bigint("0");
+    let one = build_bigint("1");
+    let two = build_bigint("2");
+    let bitand_helper = (&one << q) - &one;
+    let mut w_cpy = w + &zero;
+
+    for _ in 0..(r.mag[0] + 1) {
+        w_parts.push(&w_cpy & &bitand_helper);
+        w_cpy = &w_cpy >> q;
+    }
+
+    let mut counter = build_bigint("0");
+    let r_usize = r.mag[0] as usize;
+    let upper_bound = two * r;
+    while counter <= upper_bound {
+        let mut tmp = &w_parts[r_usize] + &zero;
+
+        for j in (0..r_usize).rev() {
+            tmp = &tmp * &counter;
+            tmp = &tmp + &w_parts[j];
+        }
+        stack_w.push(tmp);
+        counter = &counter + &one;
+    }
+    return stack_w;
+}
+
+pub fn toom_cook(a: &BigInt, b: &BigInt) -> BigInt {
+    let mut k: usize = 1;
+    let mut q_list: Vec<BigInt> = Vec::new();
+    q_list.push(build_bigint("16"));
+    q_list.push(build_bigint("16"));
+    let mut r_list: Vec<BigInt> = Vec::new();
+    r_list.push(build_bigint("4"));
+    r_list.push(build_bigint("4"));
+
+    let mut q_pow: BigInt = build_bigint("4");
+    let mut r_pow: BigInt = build_bigint("2");
+
+    let n = max(a.len, b.len) as isize;
+    let mut n_bigint = BigInt {
+        mag: vec![n & (B-1), n & B],
+        sgn: 1,
+        len: 2,
+    };
+    n_bigint.rm_leading_zeros();
+
+    n_bigint = &n_bigint * build_bigint(&(isize::BITS-2).to_string());
+
+    let one = build_bigint_bin("0b1");
+
+    while &q_list[k] + &q_list[k - 1] < n_bigint {
+        k += 1;
+        q_pow = &q_pow + &r_pow;
+        if (&r_pow + &one) * (&r_pow + &one) <= q_pow {
+            r_pow = &r_pow + &one;
+        }
+        q_list.push(&one << &q_pow);
+        r_list.push(&one << &r_pow);
+    }
+
+    let code_1: BigInt = BigInt {
+        mag: vec![],
+        len: 0,
+        sgn: 2,
+    };
+    let code_2: BigInt = BigInt {
+        mag: vec![],
+        len: 0,
+        sgn: 3,
+    };
+    let code_3: BigInt = BigInt {
+        mag: vec![],
+        len: 0,
+        sgn: 4,
+    };
+
+    let mut stack_c = Vec::new();
+    stack_c.push(code_1);
+    stack_c.push(a.abs());
+    stack_c.push(b.abs());
+
+    let mut w: BigInt;
+    let mut stack_w = Vec::new();
+    let zero = build_bigint_bin("0b0");
+
+    'outer: loop {
+        k -= 1;
+        if k > 0 {
+            let r = &r_list[k];
+            let q = &q_list[k];
+            let u = stack_c.pop().unwrap();
+            let mut stack_u = get_toom_cook_poly_evals(&u, r, q);
+            let v = stack_c.pop().unwrap();
+            let mut stack_v = get_toom_cook_poly_evals(&v, r, q);
+
+            stack_c.push(&code_2 + &zero);
+            stack_c.push(stack_v.pop().unwrap());
+            stack_c.push(stack_u.pop().unwrap());
+
+            for _ in 0..(2 * r.mag[0]) {
+                stack_c.push(&code_3 + &zero);
+                stack_c.push(stack_v.pop().unwrap());
+                stack_c.push(stack_u.pop().unwrap());
+            }
+        } else {
+            w = stack_c.pop().unwrap() * stack_c.pop().unwrap();
+
+            'inner: loop {
+                k += 1;
+                let code = stack_c.pop().unwrap();
+                if code.sgn == 2 {
+                    break 'outer;
+                } else if code.sgn == 4 {
+                    stack_w.push(w);
+                    break 'inner;
+                } else {
+                    stack_w.push(w);
+                    let r = &r_list[k];
+                    let r_usize = r.mag[0] as usize;
+                    let q = &q_list[k];
+                    let mut counter = build_bigint("1");
+
+                    let mut tmp_stack = Vec::new();
+                    for _ in 0..(2*r_usize+1) {
+                        tmp_stack.push(stack_w.pop().unwrap());
+                    }
+
+                    let mut mystack = Vec::new();
+                    for _ in 0..(2*r_usize+1) {
+                        mystack.push(tmp_stack.pop().unwrap());
+                    }
+
+                    for j in 1..(2 * r_usize + 1) {
+                        for t in (j..(2 * r_usize + 1)).rev() {
+                            mystack[t] = (&mystack[t] - &mystack[t - 1]) / &counter;
+                        }
+                        counter = &counter + &one;
+                    }
+
+                    counter = &counter - &one;
+                    for j in (1..(2 * r_usize)).rev() {
+                        counter = &counter - &one;
+                        for t in j..(2 * r_usize) {
+                            mystack[t] = &mystack[t] - &counter * &mystack[t + 1];
+                        }
+                    }
+
+                    w = build_bigint("0");
+                    for _ in 0..(2 * r_usize + 1) {
+                        w = (&w << q) + mystack.pop().unwrap();
+                    }
+                }
+            }
+        }
+    }
+
+    w.sgn = a.sgn * b.sgn;
+    return w;
+}*/
 
 fn divmod(a: &BigInt, b: &BigInt) -> (BigInt, BigInt) {
     if b.sgn == 0 {
@@ -670,8 +1021,12 @@ fn divmod(a: &BigInt, b: &BigInt) -> (BigInt, BigInt) {
                 qr = 1.0;
             }
         }
-        k = qr.floor() as isize;
-        k_bigint = build_bigint(&k.to_string());
+        k = min(qr.floor() as isize, B-1) ;
+        k_bigint = BigInt {
+            mag: vec![k],
+            sgn: 1,
+            len: 1,
+        };
         q.mag[j] += k;
         found_factor = false;
 
@@ -694,9 +1049,11 @@ fn divmod(a: &BigInt, b: &BigInt) -> (BigInt, BigInt) {
             if tmp.sgn == -1 {
                 k_bigint = k_bigint - &one;
                 q.mag[j] -= 1;
-                if q.mag[j] == 0 {
+                if k_bigint.sgn == 0 {
                     k_bigint.mag[0] = B - 1;
-                    q.mag[j - 1] = B - 1;
+                    k_bigint.len = 1;
+                    k_bigint.sgn = 1;
+                    q.mag[j - 1] += B - 1;
                     j -= 1;
                 }
             } else {
@@ -736,6 +1093,9 @@ fn divmod(a: &BigInt, b: &BigInt) -> (BigInt, BigInt) {
 }
 
 fn shl(a: &BigInt, b: &BigInt) -> BigInt {
+    if a.sgn == 0 {
+        return build_bigint("0");
+    }
     let q: BigInt;
     let r: BigInt;
     // compiler should optimize this but move the build_bigint outside to test later
@@ -748,7 +1108,7 @@ fn shl(a: &BigInt, b: &BigInt) -> BigInt {
 
     let c_mag_leading_zeros: usize;
     match q.len {
-        2 => c_mag_leading_zeros = (q.mag[0] | (1 << (isize::BITS - 2))) as usize,
+        2 => c_mag_leading_zeros = (q.mag[0] | B) as usize,
         1 => c_mag_leading_zeros = q.mag[0] as usize,
         _ => c_mag_leading_zeros = 0 as usize,
     }
@@ -813,7 +1173,7 @@ fn shr(a: &BigInt, b: &BigInt) -> BigInt {
             if q.mag[1] > 1 {
                 big_shift = true;
             } else {
-                new_first_index = (q.mag[0] | (1 << (isize::BITS - 2))) as usize;
+                new_first_index = (q.mag[0] | B) as usize;
             }
         }
         _ => big_shift = true,
@@ -1234,6 +1594,9 @@ impl ops::Mul<BigInt> for BigInt {
     type Output = BigInt;
 
     fn mul(self, b: BigInt) -> BigInt {
+        /*if self.len >= TOOM_COOK_CUTOFF && b.len >= TOOM_COOK_CUTOFF {
+            return toom_cook(&self, &b);
+        } else */
         if self.len >= KARATSUBA_CUTOFF && b.len >= KARATSUBA_CUTOFF {
             return karatsuba(&self, &b);
         } else {
@@ -1246,6 +1609,9 @@ impl ops::Mul<&BigInt> for BigInt {
     type Output = BigInt;
 
     fn mul(self, b: &BigInt) -> BigInt {
+        /*if self.len >= TOOM_COOK_CUTOFF && b.len >= TOOM_COOK_CUTOFF {
+            return toom_cook(&self, b);
+        } else */
         if self.len >= KARATSUBA_CUTOFF && b.len >= KARATSUBA_CUTOFF {
             return karatsuba(&self, b);
         } else {
@@ -1258,6 +1624,9 @@ impl ops::Mul<BigInt> for &BigInt {
     type Output = BigInt;
 
     fn mul(self, b: BigInt) -> BigInt {
+        /*if self.len >= TOOM_COOK_CUTOFF && b.len >= TOOM_COOK_CUTOFF {
+            return toom_cook(self, &b);
+        } else */
         if self.len >= KARATSUBA_CUTOFF && b.len >= KARATSUBA_CUTOFF {
             return karatsuba(self, &b);
         } else {
@@ -1270,6 +1639,9 @@ impl ops::Mul<&BigInt> for &BigInt {
     type Output = BigInt;
 
     fn mul(self, b: &BigInt) -> BigInt {
+        /*if self.len >= TOOM_COOK_CUTOFF && b.len >= TOOM_COOK_CUTOFF {
+            return toom_cook(self, b);
+        } else */
         if self.len >= KARATSUBA_CUTOFF && b.len >= KARATSUBA_CUTOFF {
             return karatsuba(self, b);
         } else {
@@ -2379,7 +2751,7 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn bigint_gradeschool_speed_test() {
+    fn bigint_gradeschool_speed_test1() {
         if let Ok(lines) = read_lines("./mul.txt") {
             for line in lines {
                 if let Ok(testcase) = line {
@@ -2399,7 +2771,7 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn bigint_karatsuba_speed_test() {
+    fn bigint_karatsuba_speed_test1() {
         if let Ok(lines) = read_lines("./mul.txt") {
             for line in lines {
                 if let Ok(testcase) = line {
@@ -2407,6 +2779,86 @@ mod tests {
                     assert_eq!(
                         v[2],
                         (super::karatsuba(
+                            &super::build_bigint_bin(v[0]),
+                            &super::build_bigint_bin(v[1])
+                        ))
+                        .to_string_bin()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bigint_toom_cook_speed_test1() {
+        if let Ok(lines) = read_lines("./mul.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[2],
+                        (super::toom_cook(
+                            &super::build_bigint_bin(v[0]),
+                            &super::build_bigint_bin(v[1])
+                        ))
+                        .to_string_bin()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bigint_gradeschool_speed_test2() {
+        if let Ok(lines) = read_lines("./mul2.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[2],
+                        (super::mul(
+                            &super::build_bigint_bin(v[0]),
+                            &super::build_bigint_bin(v[1])
+                        ))
+                        .to_string_bin()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bigint_karatsuba_speed_test2() {
+        if let Ok(lines) = read_lines("./mul2.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[2],
+                        (super::karatsuba(
+                            &super::build_bigint_bin(v[0]),
+                            &super::build_bigint_bin(v[1])
+                        ))
+                        .to_string_bin()
+                    );
+                }
+            }
+        }
+    }
+    
+    #[test]
+    #[ignore]
+    fn bigint_toom_cook_speed_test2() {
+        if let Ok(lines) = read_lines("./mul2.txt") {
+            for line in lines {
+                if let Ok(testcase) = line {
+                    let v: Vec<&str> = testcase.split(',').collect();
+                    assert_eq!(
+                        v[2],
+                        (super::toom_cook(
                             &super::build_bigint_bin(v[0]),
                             &super::build_bigint_bin(v[1])
                         ))
